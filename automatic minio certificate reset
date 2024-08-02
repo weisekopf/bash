@@ -1,0 +1,64 @@
+This script was tested on CentOS 7
+
+Part 1. Automatic script execution on every VM boot
+
+[root@minio ~]# cat /etc/rc.d/rc.local
+
+sh /root/openssl/startup.sh
+
+Part 2. Defining default certificate properties
+
+[root@minio ~]# cat /root/openssl/san.cnf
+
+[req]
+default_bits = 2048
+distinguished_name = req_distinguished_name
+req_extensions = req_ext
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+countryName = XX
+stateOrProvinceName = N/A
+localityName = N/A
+organizationName = Self-signed certificate
+commonName = Self-signed certificate
+
+[req_ext]
+subjectAltName = @alt_names
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 =
+
+Part 3. The main script itself
+
+[root@minio ~]# cat /root/openssl/startup.sh
+
+#!/bin/bash
+
+# This script is executed with delay of 30s each time the VM is booted.
+# It stops the minio service, removes previously used openssl certificates,
+# reads the current IPv4 address, passes it into "san.cnf" config file,
+# generates new certificate for the current IPv4 address, copies it to
+# the minio certificate folder and starts the minio service.
+# The whole procedure is performed anew each time at the VM boot time, since
+# the VM IP address is subject to change.
+
+sleep 30
+
+IPv4_VAR=$(hostname -i)
+
+systemctl stop minio
+
+rm -f /root/minio-certs/private.key && rm -f /root/minio-certs/public.crt && rm -f /root/openssl/private.key && rm -f /root/openssl/public.crt
+
+sed -i '$d' /root/openssl/san.cnf && echo "IP.1 = $IPv4_VAR" >> /root/openssl/san.cnf
+
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout /root/openssl/private.key -out /root/openssl/public.crt -config /root/openssl/san.cnf
+
+cp /root/openssl/private.key /root/minio-certs/ && cp /root/openssl/public.crt /root/minio-certs/
+
+systemctl start minio
